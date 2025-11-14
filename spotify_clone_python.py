@@ -1,6 +1,7 @@
 import os
 import random
 import threading
+import shutil
 from pytubefix import YouTube
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
@@ -12,11 +13,66 @@ from kivy.clock import mainthread
 from kivy.uix.scrollview import ScrollView
 from kivy.metrics import dp
 
-
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+# =====================================================================
+# FFmpeg AUTO-DETECT
+# =====================================================================
+def find_ffmpeg():
+    """
+    Searches for ffmpeg:
+    1) PATH
+    2) Common install locations
+    3) Full drive fallback
+    """
 
+    # 1) Try PATH
+    ff = shutil.which("ffmpeg")
+    if ff:
+        return ff
+
+    # 2) Common directories (fixed)
+    search_dirs = []
+
+    if os.name == "nt":  # Windows
+        search_dirs += [
+            "C:\\Program Files",
+            "C:\\Program Files (x86)",
+            "C:\\ffmpeg",
+            "C:\\",             # <— FIXED: no raw string, no dangling slash issue
+        ]
+    else:  # Linux / macOS
+        search_dirs += [
+            "/usr/bin",
+            "/usr/local/bin",
+            "/opt",
+            "/",
+        ]
+
+    # 3) Walk directories looking for ffmpeg
+    for base in search_dirs:
+        for root, _, files in os.walk(base):
+            for f in files:
+                if f.lower() in ("ffmpeg", "ffmpeg.exe"):
+                    return os.path.join(root, f)
+
+    return None
+
+
+    # 3) Walk directories looking for ffmpeg
+    for base in search_dirs:
+        for root, _, files in os.walk(base):
+            for f in files:
+                if f.lower() in ("ffmpeg", "ffmpeg.exe"):
+                    return os.path.join(root, f)
+
+    return None
+
+
+# =====================================================================
+# MAIN APP
+# =====================================================================
 class SpotifyClone(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation="vertical", spacing=10, padding=10, **kwargs)
@@ -25,9 +81,7 @@ class SpotifyClone(BoxLayout):
         self.current_index = -1
         self.current_sound = None
 
-        # ================================================================
         # HEADER + SEARCH
-        # ================================================================
         header = BoxLayout(size_hint=(1, 0.08), spacing=10)
         self.search_input = TextInput(
             hint_text="Search playlist...",
@@ -38,24 +92,18 @@ class SpotifyClone(BoxLayout):
         self.search_input.bind(text=self.filter_playlist)
         self.add_widget(header)
 
-        # ================================================================
         # STATUS LABEL
-        # ================================================================
         self.status_label = Label(text="Ready", size_hint=(1, 0.08))
         self.add_widget(self.status_label)
 
-        # ================================================================
-        # PLAYLIST VIEW (SCROLL)
-        # ================================================================
+        # PLAYLIST VIEW
         scroll = ScrollView(size_hint=(1, 0.55))
         self.playlist_box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=5)
         self.playlist_box.bind(minimum_height=self.playlist_box.setter("height"))
         scroll.add_widget(self.playlist_box)
         self.add_widget(scroll)
 
-        # ================================================================
         # PLAYER CONTROLS
-        # ================================================================
         controls = BoxLayout(size_hint=(1, 0.10), spacing=10)
 
         controls.add_widget(Button(
@@ -96,11 +144,8 @@ class SpotifyClone(BoxLayout):
 
         self.add_widget(controls)
 
-        # ================================================================
-        # URL INPUT + ADD BUTTON (SMALLER)
-        # ================================================================
+        # URL INPUT + ADD BUTTON
         add_row = BoxLayout(size_hint=(1, 0.07), spacing=10)
-
         self.url_input = TextInput(
             hint_text="YouTube URL",
             multiline=False,
@@ -119,9 +164,7 @@ class SpotifyClone(BoxLayout):
 
         self.update_playlist_display()
 
-    # ================================================================
-    # PLAYLIST UI UPDATES
-    # ================================================================
+    # UPDATE PLAYLIST UI
     def update_playlist_display(self, filtered=None):
         self.playlist_box.clear_widgets()
         items = filtered if filtered is not None else self.playlist
@@ -144,16 +187,14 @@ class SpotifyClone(BoxLayout):
         filtered = [s for s in self.playlist if q in s.lower()]
         self.update_playlist_display(filtered)
 
-    # ================================================================
-    # DOWNLOAD & ADD
-    # ================================================================
+    # DOWNLOAD & ADD SONG
     def add_song(self, *args):
         url = self.url_input.text.strip()
         if not url:
             self.status_label.text = "Enter a URL first."
             return
 
-        self.url_input.text = ""  # ✔ auto-clear input field
+        self.url_input.text = ""
         self.status_label.text = "Downloading..."
 
         threading.Thread(target=self.download_thread, args=(url,), daemon=True).start()
@@ -166,8 +207,14 @@ class SpotifyClone(BoxLayout):
 
             output_file = os.path.join(DOWNLOAD_DIR, f"{yt.title}.mp3")
 
-            cmd = f'ffmpeg -y -i "{temp_file}" "{output_file}"'
+            ffmpeg_path = find_ffmpeg()
+            if not ffmpeg_path:
+                self.set_status("ffmpeg not found on this device.")
+                return
+
+            cmd = f'"{ffmpeg_path}" -y -i "{temp_file}" "{output_file}"'
             os.system(cmd)
+
             os.remove(temp_file)
 
             self.add_to_playlist(output_file)
@@ -185,9 +232,7 @@ class SpotifyClone(BoxLayout):
     def set_status(self, text):
         self.status_label.text = text
 
-    # ================================================================
     # PLAYBACK
-    # ================================================================
     def play_selected(self, index):
         self.current_index = index
         self.play_song()
